@@ -13,18 +13,24 @@ const WINDOW_HEIGHT: u32 = 480;
 
 const VERTICES: &[Vertex] = &[
     Vertex {
-        position: [0.0, 0.5, 0.0],
+        position: [-0.5, 0.5, 0.0],
         color: [1.0, 0.0, 0.0],
     },
     Vertex {
         position: [-0.5, -0.5, 0.0],
-        color: [0.0, 1.0, 0.0],
+        color: [0.0, 0.0, 1.0],
     },
     Vertex {
         position: [0.5, -0.5, 0.0],
-        color: [0.0, 0.0, 1.0],
+        color: [0.0, 1.0, 0.0],
+    },
+    Vertex {
+        position: [0.5, 0.5, 0.0],
+        color: [1.0, 0.0, 1.0],
     },
 ];
+
+const INDICES: &[u16] = &[0, 1, 2, 2, 3, 0];
 
 #[tokio::main]
 async fn main() {
@@ -156,11 +162,18 @@ async fn main() {
         multiview: None,
     });
 
-    // Cria buffer com os dados criados
+    // Cria um vertex buffer com os dados de cada vertice
     let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Triangulo buffer"),
         contents: bytemuck::cast_slice(VERTICES),
         usage: wgpu::BufferUsages::VERTEX,
+    });
+
+    // Cria o index buffer para reaproveitar vertices em formas mais complexas
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Triangulo buffer indices"),
+        contents: bytemuck::cast_slice(INDICES),
+        usage: wgpu::BufferUsages::INDEX,
     });
 
     let _ = event_loop.run(|event, target| match event {
@@ -205,8 +218,10 @@ async fn main() {
             render_pass.set_pipeline(&render_pipeline);
             // Diz pra renderizar este buffer
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            // Com essa quantidade de vertices
-            render_pass.draw(0..VERTICES.len() as u32, 0..1);
+            // Além de setar o vertex buffer, seta o index buffer
+            render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            // Renderiza baseado nos indices informados antes
+            render_pass.draw_indexed(0..INDICES.len() as u32, 0, 0..1);
             drop(render_pass);
 
             // Faz o submit dos render passs e apresenta
