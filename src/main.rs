@@ -53,6 +53,13 @@ async fn main() {
 
     // Configurações que serão usadas quando esta Surface criar suas SurfaceTextures
     let surface_capabilities = surface.get_capabilities(&adapter);
+    let surface_format = *surface_capabilities
+        .formats
+        .iter()
+        .filter(|f| f.is_srgb())
+        .next()
+        .unwrap_or(&surface_capabilities.formats[0]);
+
     surface.configure(
         &device,
         &wgpu::SurfaceConfiguration {
@@ -61,12 +68,7 @@ async fn main() {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             // Como esta SurfaceTexture vai ser guardado em memória, setamos para sRGB, ou o que
             // tiver
-            format: *surface_capabilities
-                .formats
-                .iter()
-                .filter(|f| f.is_srgb())
-                .next()
-                .unwrap_or(&surface_capabilities.formats[0]),
+            format: surface_format,
             // Dimensões da textura
             width: WINDOW_WIDTH,
             height: WINDOW_HEIGHT,
@@ -79,6 +81,51 @@ async fn main() {
             desired_maximum_frame_latency: 2,
         },
     );
+
+    // Create pipeline
+    let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor::default());
+    let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Render Pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: "vs_main",
+            // Dados que a gente passa pro vertex shader, não é usado no tutorial ainda
+            buffers: &[],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: "fs_main",
+            // Configurações do fragment shader
+            targets: &[Some(wgpu::ColorTargetState {
+                // O formato das cores que o shader vai responder
+                format: surface_format,
+                // Substitui todos os pixels da textura
+                blend: Some(wgpu::BlendState::REPLACE),
+                // Relevante para texturas
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: Some(wgpu::Face::Back),
+            polygon_mode: wgpu::PolygonMode::Fill,
+            // Requires Features::DEPTH_CLIP_CONTROL
+            unclipped_depth: false,
+            // Requires Features::CONSERVATIVE_RASTERIZATION
+            conservative: false,
+        },
+        multisample: wgpu::MultisampleState {
+            count: 1,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        },
+        depth_stencil: None,
+        multiview: None,
+    });
 
     let _ = event_loop.run(|event, target| match event {
         winit::event::Event::WindowEvent {
@@ -100,7 +147,7 @@ async fn main() {
             // Buffer de comandos que são enviados para a GPU
             let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
             // Aqui vão todos os comandos que são passados para a GPU
-            let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     // Qual texture que vai ser desenhada, no caso a SurfaceTexture da janela
                     view: &view,
@@ -119,6 +166,9 @@ async fn main() {
                 })],
                 ..Default::default()
             });
+            render_pass.set_pipeline(&render_pipeline);
+            render_pass.draw(0..3, 0..1);
+            drop(render_pass);
 
             // Faz o submit dos render passs e apresenta
             queue.submit([encoder.finish()]);
