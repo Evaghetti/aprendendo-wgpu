@@ -6,6 +6,7 @@ use winit::{dpi::LogicalSize, event::WindowEvent, event_loop::EventLoop, window:
 struct Vertex {
     position: [f32; 3],
     color: [f32; 3],
+    texture_coord: [f32; 2],
 }
 
 const WINDOW_WIDTH: u32 = 640;
@@ -15,18 +16,22 @@ const VERTICES: &[Vertex] = &[
     Vertex {
         position: [-0.5, 0.5, 0.0],
         color: [1.0, 0.0, 0.0],
+        texture_coord: [0.0, 0.0],
     },
     Vertex {
         position: [-0.5, -0.5, 0.0],
-        color: [0.0, 0.0, 1.0],
+        color: [0.0, 1.0, 0.0],
+        texture_coord: [0.0, 1.0],
     },
     Vertex {
         position: [0.5, -0.5, 0.0],
-        color: [0.0, 1.0, 0.0],
+        color: [0.0, 0.0, 1.0],
+        texture_coord: [1.0, 1.0],
     },
     Vertex {
         position: [0.5, 0.5, 0.0],
         color: [1.0, 0.0, 1.0],
+        texture_coord: [1.0, 0.0],
     },
 ];
 
@@ -36,6 +41,7 @@ const INDICES: &[u16] = &[0, 1, 2, 2, 3, 0];
 async fn main() {
     let event_loop = EventLoop::new().expect("Não foi possível criar looping de eventos");
     let window = WindowBuilder::new()
+        .with_title("WGPU da desgraçaaaa")
         .with_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
         .with_resizable(false)
         .build(&event_loop)
@@ -110,9 +116,113 @@ async fn main() {
         },
     );
 
+    // Lê a imagem de disco
+    let image = image::io::Reader::open("res/container.jpg")
+        .expect("Não foi possível abrir imagem")
+        .decode()
+        .expect("Erro ao processar imagem");
+    let texture_size = wgpu::Extent3d {
+        width: image.width(),
+        height: image.height(),
+        depth_or_array_layers: 1,
+    };
+    // Cria uma textura
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Container"),
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        // Textura pode ser usada num binding group e pode receber dados no write_texture
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        sample_count: 1,
+        size: texture_size,
+        // Dimensões dessa imagem (2D)
+        dimension: wgpu::TextureDimension::D2,
+        view_formats: &[],
+        // Quantidade de mipmap? O tutorial n explicou, deixando como tá lá
+        mip_level_count: 1,
+    });
+
+    // Passa os dados da textura pra textura criada
+    queue.write_texture(
+        wgpu::ImageCopyTexture {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &image.to_rgba8(),
+        wgpu::ImageDataLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * image.width()),
+            rows_per_image: Some(image.height()),
+        },
+        texture_size,
+    );
+
+    // Cria uma texture view (tipo um ponteiro pra textura, se eu entendi direito)
+    // E um sampler pra ser usado no shader, o sampler informa como o shader deve renderizar a
+    // imagem na textura
+    let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("Texture sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        address_mode_w: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Nearest,
+        mipmap_filter: wgpu::FilterMode::Nearest,
+        ..Default::default()
+    });
+    // Cria o layout do bind group
+    let texture_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Texture bind group layout"),
+            entries: &[
+                // Duas entradas, uma pra textura, e outra pro sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    // Só pode ser usado no fragment shader
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    count: None,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    // Só pode ser usado no fragment shader
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    count: None,
+                    // necessário bater com o sample_type da textura, não sei o que o filtering
+                    // quer dizer
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                },
+            ],
+        });
+    // Cria o bind groupd com o layout criado e sampler e view criados
+    let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Bind Group"),
+        layout: &texture_bind_group_layout,
+        entries: &[
+            // Aqui são os dados que equivalem o que foi configurado no layout
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&texture_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&texture_sampler),
+            },
+        ],
+    });
+
     // Create pipeline
     let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
-    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor::default());
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        bind_group_layouts: &[&texture_bind_group_layout],
+        ..Default::default()
+    });
     let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("Render Pipeline"),
         layout: Some(&pipeline_layout),
@@ -126,7 +236,7 @@ async fn main() {
                 // Honestamente, não entendi esse campo kkkkkkk
                 step_mode: wgpu::VertexStepMode::Vertex,
                 // O tipo de cada campo no VAO
-                attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+                attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2],
             }],
         },
         fragment: Some(wgpu::FragmentState {
@@ -216,6 +326,8 @@ async fn main() {
                 ..Default::default()
             });
             render_pass.set_pipeline(&render_pipeline);
+            // Seta o bind group para o bind group criado
+            render_pass.set_bind_group(0, &texture_bind_group, &[]);
             // Diz pra renderizar este buffer
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             // Além de setar o vertex buffer, seta o index buffer
