@@ -1,8 +1,30 @@
-use wgpu::{CommandEncoderDescriptor, TextureViewDescriptor};
+use wgpu::{util::DeviceExt, CommandEncoderDescriptor, TextureViewDescriptor};
 use winit::{dpi::LogicalSize, event::WindowEvent, event_loop::EventLoop, window::WindowBuilder};
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    position: [f32; 3],
+    color: [f32; 3],
+}
 
 const WINDOW_WIDTH: u32 = 640;
 const WINDOW_HEIGHT: u32 = 480;
+
+const VERTICES: &[Vertex] = &[
+    Vertex {
+        position: [0.0, 0.5, 0.0],
+        color: [1.0, 0.0, 0.0],
+    },
+    Vertex {
+        position: [-0.5, -0.5, 0.0],
+        color: [0.0, 1.0, 0.0],
+    },
+    Vertex {
+        position: [0.5, -0.5, 0.0],
+        color: [0.0, 0.0, 1.0],
+    },
+];
 
 #[tokio::main]
 async fn main() {
@@ -91,8 +113,15 @@ async fn main() {
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: "vs_main",
-            // Dados que a gente passa pro vertex shader, não é usado no tutorial ainda
-            buffers: &[],
+            // Configura os buffer usado pelo vertex shader
+            buffers: &[wgpu::VertexBufferLayout {
+                // Cada buffer tem essa quantia de bytes de tamanho
+                array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                // Honestamente, não entendi esse campo kkkkkkk
+                step_mode: wgpu::VertexStepMode::Vertex,
+                // O tipo de cada campo no VAO
+                attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+            }],
         },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
@@ -125,6 +154,13 @@ async fn main() {
         },
         depth_stencil: None,
         multiview: None,
+    });
+
+    // Cria buffer com os dados criados
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Triangulo buffer"),
+        contents: bytemuck::cast_slice(VERTICES),
+        usage: wgpu::BufferUsages::VERTEX,
     });
 
     let _ = event_loop.run(|event, target| match event {
@@ -167,7 +203,10 @@ async fn main() {
                 ..Default::default()
             });
             render_pass.set_pipeline(&render_pipeline);
-            render_pass.draw(0..3, 0..1);
+            // Diz pra renderizar este buffer
+            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            // Com essa quantidade de vertices
+            render_pass.draw(0..VERTICES.len() as u32, 0..1);
             drop(render_pass);
 
             // Faz o submit dos render passs e apresenta
