@@ -217,10 +217,40 @@ async fn main() {
         ],
     });
 
+    // Cria o transform pra rotação, um buffer, e o bind_group dele
+    let mut transform = nalgebra_glm::Mat4x4::identity();
+    let transform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Buffer transform"),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        contents: bytemuck::bytes_of(&transform),
+    });
+    let transform_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Layout binding group transform"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                count: None,
+                visibility: wgpu::ShaderStages::VERTEX,
+                binding: 0,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+            }],
+        });
+    let transform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Binding group transform"),
+        layout: &transform_bind_group_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: transform_buffer.as_entire_binding(),
+        }],
+    });
+
     // Create pipeline
     let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        bind_group_layouts: &[&texture_bind_group_layout],
+        bind_group_layouts: &[&texture_bind_group_layout, &transform_bind_group_layout],
         ..Default::default()
     });
     let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -291,6 +321,12 @@ async fn main() {
             event: WindowEvent::CloseRequested,
             ..
         } => target.exit(),
+        // Dps de renderizar, rotaciona a matriz e atualiza o buffer, pede um novo render.
+        winit::event::Event::AboutToWait => {
+            transform = nalgebra_glm::rotate_z(&transform, -1f32.to_radians());
+            queue.write_buffer(&transform_buffer, 0, bytemuck::bytes_of(&transform));
+            window.request_redraw();
+        }
         winit::event::Event::WindowEvent {
             event: WindowEvent::RedrawRequested,
             ..
@@ -328,6 +364,8 @@ async fn main() {
             render_pass.set_pipeline(&render_pipeline);
             // Seta o bind group para o bind group criado
             render_pass.set_bind_group(0, &texture_bind_group, &[]);
+            // Temos o bind group do transform agr, seta ele
+            render_pass.set_bind_group(1, &transform_bind_group, &[]);
             // Diz pra renderizar este buffer
             render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             // Além de setar o vertex buffer, seta o index buffer

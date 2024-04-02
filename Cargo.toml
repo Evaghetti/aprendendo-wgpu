@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 bytemuck = { version = "1.15.0", features = ["derive"] }
 image = "0.25.1"
+nalgebra-glm = { version = "0.18.0", features = ["convert-bytemuck"] }
 tokio = { version = "1.37.0", features = ["macros", "rt", "rt-multi-thread"] }
 wgpu = "0.19.3"
 winit = "0.29.15"
